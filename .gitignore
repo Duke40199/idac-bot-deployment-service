@@ -1,0 +1,22 @@
+# --- never commit real secrets / env ---
+.env
+.env.*
+!.env.example
+
+# real out-of-band secret material (templates with .example are kept, below)
+secret.env
+*.secret.env
+secret.yaml
+*.secret.yaml
+
+# local-only, real-value overrides (if you ever add kustomize local patches)
+*.local.yaml
+
+# --- keep the templates tracked (negations come last to win) ---
+!secret.env.example
+!secret.example.yaml
+
+# OS / editor noise
+.DS_Store
+.idea/
+.vscode/*

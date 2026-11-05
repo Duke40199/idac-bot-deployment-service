@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# All resources land in this namespace. ArgoCD creates it (CreateNamespace=true).
+namespace: idac-amane
+
+resources:
+  - ../../base
+  # The SealedSecret is cluster-specific (encrypted to THIS cluster's key), so it
+  # lives in the overlay, not the shared base. Generate it with scripts/seal-secret.sh
+  # then uncomment the next line (first run only) and commit sealed-secret.yaml.
+  # - sealed-secret.yaml
+
+# Pin the image here (the standard GitOps place — base stays a default).
+# The image is pulled from GHCR, so it can be built on any machine (e.g. your dev
+# box where the code lives) and the minikube host just pulls it. Build + push:
+#   docker build -t ghcr.io/duke40199/idac-amane-bot:0.1.0 /Users/poteto/go/src/idac-amane-bot
+#   docker push ghcr.io/duke40199/idac-amane-bot:0.1.0
+# To ship a new build: push a new tag, bump newTag below, commit — that's the loop.
+# (GHCR path must be lowercase, hence `duke40199`.)
+images:
+  - name: idac-amane-bot
+    newName: ghcr.io/duke40199/idac-amane-bot
+    newTag: "0.1.0"

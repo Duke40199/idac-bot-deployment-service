@@ -1,0 +1,27 @@
+# The "app of apps" — apply this ONE Application and nothing else:
+#   kubectl apply -n argocd -f applications/landingzone.yaml
+# It points ArgoCD at the applicationsets/ directory; everything else (the
+# AppProject + the ApplicationSet that generates one Application per service) is
+# then managed from Git. This mirrors deployment-service's landingzone pattern.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: landingzone
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Duke40199/idac-bot-deployment-service.git
+    targetRevision: main
+    path: applicationsets
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

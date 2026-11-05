@@ -1,0 +1,66 @@
+# idac-amane-bot — outbound-only Discord worker.
+#
+# replicas MUST stay 1: it's a singleton. Two replicas => the bot double-posts
+# to Discord and runs every sync loop twice. (Same reason deployment-service
+# pins rule-admin to 1.)
+#
+# Config comes entirely from the environment (see internal/config/config.go):
+#   - ConfigMap  idac-amane-bot-config : all non-secret values
+#   - Secret     idac-amane-bot-secret : DISCORD_BOT_TOKEN, DB_PASSWORD
+# The Secret is NOT in this repo — create it out-of-band (see secret.example.yaml).
+#
+# AWS bits from deployment-service were intentionally dropped for minikube:
+#   - ECR image           -> GHCR image, pulled by the node (overlay pins it)
+#   - ExternalSecret/SM   -> plain Secret created with kubectl
+#   - IRSA ServiceAccount -> none (bot needs no AWS APIs)
+#   - node affinity/taints-> none (minikube is a single untainted node)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: idac-amane-bot
+  labels:
+    app: idac-amane-bot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: idac-amane-bot
+  template:
+    metadata:
+      labels:
+        app: idac-amane-bot
+    spec:
+      containers:
+        - name: idac-amane-bot
+          # Overlay sets newName/newTag (kustomize) -> ghcr.io/duke40199/...
+          # Never rely on :latest — ArgoCD can't detect a redeploy if the tag
+          # doesn't change, and IfNotPresent would keep a stale cached image.
+          image: idac-amane-bot
+          imagePullPolicy: IfNotPresent # unique tags => reuse if cached, else pull from GHCR
+          ports:
+            - name: health
+              containerPort: 10000 # keep in sync with PORT in the ConfigMap
+          envFrom:
+            - configMapRef:
+                name: idac-amane-bot-config
+            - secretRef:
+                name: idac-amane-bot-secret
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

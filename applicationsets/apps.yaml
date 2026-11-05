@@ -1,0 +1,63 @@
+# AppProject + ApplicationSet, managed by landingzone.yaml (the app-of-apps).
+#
+# The ApplicationSet uses a git-directory generator: it scans the repo for
+# projects/*/overlays/local and creates one ArgoCD Application per match. Add a
+# second app later (projects/<new-app>/overlays/local) and it appears
+# automatically — that's the payoff of this pattern at scale. This is the
+# minikube/AWS-free cousin of deployment-service's applicationsets/backend.yaml.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: idac
+  namespace: argocd
+spec:
+  description: idac personal apps (local/minikube)
+  sourceRepos:
+    - https://github.com/Duke40199/idac-bot-deployment-service.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: '*'
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: idac-apps
+  namespace: argocd
+spec:
+  goTemplate: true
+  generators:
+    - git:
+        repoURL: https://github.com/Duke40199/idac-bot-deployment-service.git
+        revision: main
+        directories:
+          - path: projects/*/overlays/local
+  template:
+    metadata:
+      # path.segments = [projects, <app>, overlays, local] -> index 1 = <app>
+      name: '{{index .path.segments 1}}'
+    spec:
+      project: idac
+      source:
+        repoURL: https://github.com/Duke40199/idac-bot-deployment-service.git
+        targetRevision: main
+        path: '{{.path.path}}'
+      destination:
+        server: https://kubernetes.default.svc
+        # Single shared namespace for now. To give each app its own namespace,
+        # encode it in the overlay and template it here instead.
+        namespace: idac-amane
+      syncPolicy:
+        # Auto-sync ON here (typical for an ApplicationSet). Flip to manual by
+        # removing `automated` if you'd rather sync by hand while learning.
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
