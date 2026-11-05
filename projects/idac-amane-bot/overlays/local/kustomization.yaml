@@ -9,7 +9,7 @@ resources:
   # The SealedSecret is cluster-specific (encrypted to THIS cluster's key), so it
   # lives in the overlay, not the shared base. Generate it with scripts/seal-secret.sh
   # then uncomment the next line (first run only) and commit sealed-secret.yaml.
-  # - sealed-secret.yaml
+  - sealed-secret.yaml
 
 # Pin the image here (the standard GitOps place — base stays a default).
 # The image is pulled from GHCR, so it can be built on any machine (e.g. your dev
