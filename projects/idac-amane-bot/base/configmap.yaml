@@ -30,8 +30,11 @@ data:
 
   # --- Database (connection target/creds are in the Secret) ---
   DB_PORT: "5432"
+  DB_HOST: "aws-1-ap-south-1.pooler.supabase.com"
   # require (default) | verify-full | disable. Local PG without TLS => disable.
   DB_SSLMODE: "require"
+
+
 
   # DB table names have code defaults; override here only if your schema differs.
   # These are schema identifiers, not secrets, so they're fine to keep public.
