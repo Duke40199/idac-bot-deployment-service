@@ -1,6 +1,6 @@
 # idac-bot-deployment-service
 
-GitOps config for deploying [`idac-amane-bot`](https://github.com/Duke40199) to a
+GitOps config for deploying [`idac-amane-bot`](https://github.com/Duke40199/idac-amane-bot) to a
 **local minikube** cluster via **ArgoCD**. Structure and conventions mirror the
 production `deployment-service` repo.
 
@@ -45,17 +45,27 @@ the `*.example` templates are the only secret-related files that get committed.
 
 1. `minikube start`, and ArgoCD installed in the `argocd` namespace.
 2. This repo pushed to GitHub (ArgoCD reads from Git, not your disk).
-3. **Sealed Secrets** — the controller in the cluster + the `kubeseal` CLI locally.
-   This is how secrets get into a *public* GitOps repo safely (encrypted).
+3. **Sealed Secrets** — the controller in the cluster + the `kubeseal` CLI. This is
+   how secrets get into a *public* GitOps repo safely (encrypted). Install `kubeseal`
+   on whichever machine runs the seal step: it fetches the sealing cert from the kube
+   API, so it must reach the cluster — in a split setup (code on one box, minikube on
+   another) that's the **minikube box**.
 
    ```bash
-   # cluster-side controller (installs into kube-system as sealed-secrets-controller,
-   # which is what kubeseal auto-discovers). Check the releases page for the latest tag:
-   # https://github.com/bitnami-labs/sealed-secrets/releases
-   kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.36.5/controller.yaml
+   # cluster-side controller, into kube-system (where kubeseal auto-discovers it).
+   # NOTE: some releases ship a controller.yaml whose image tag was never published to
+   # Docker Hub (e.g. v0.36.5 -> ImagePullBackOff / NotFound). If the controller pod
+   # won't pull, repoint it at a published tag:
+   #   kubectl -n kube-system set image deploy/sealed-secrets-controller \
+   #     sealed-secrets-controller=docker.io/bitnami/sealed-secrets-controller:0.36.6
+   # Published tags: https://hub.docker.com/r/bitnami/sealed-secrets-controller/tags
+   kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.36.6/controller.yaml
 
-   # local CLI (macOS)
+   # kubeseal CLI — brew on macOS; dnf/apt/etc. on a Linux cluster box
    brew install kubeseal
+
+   # the controller must be Ready before sealing (no endpoints => kubeseal fails):
+   kubectl -n kube-system rollout status deploy/sealed-secrets-controller
    ```
 
 ## Deploy
@@ -67,19 +77,34 @@ machine where the code lives — the minikube host just pulls it. GHCR paths mus
 **lowercase** (`duke40199`, not `Duke40199`).
 
 ```bash
-# one-time: log in with a GitHub PAT that has write:packages scope
+# one-time: log in with a GitHub PAT that has write:packages scope. The repo being
+# public does NOT grant push — the token scope does. (If login "succeeds" but push
+# is denied, the PAT is missing write:packages.)
 echo "$CR_PAT" | docker login ghcr.io -u Duke40199 --password-stdin
 
-docker build -t ghcr.io/duke40199/idac-amane-bot:0.1.0 /Users/poteto/go/src/idac-amane-bot
-docker push ghcr.io/duke40199/idac-amane-bot:0.1.0
+# Build MULTI-ARCH and push a manifest list. The minikube node is linux/amd64; a
+# plain `docker build` on Apple Silicon produces arm64 only, which the node can't run
+# ("no match for platform in manifest").
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/duke40199/idac-amane-bot:0.1.0 --push \
+  /Users/poteto/go/src/idac-amane-bot
 ```
 
 The tag `0.1.0` must match `newTag` in `projects/idac-amane-bot/overlays/local/kustomization.yaml`.
 
-First push creates the package as **private**. For the no-pull-secret setup, make
-it public: GitHub → your profile → Packages → `idac-amane-bot` → Package settings →
-Change visibility → Public. (To keep it private instead, add an `imagePullSecret` —
-see the note at the end.)
+First push creates the **package** as **private** — and this is **separate from the
+source repo's visibility** (a public repo does *not* make the package public). For
+the no-pull-secret setup, make the package public:
+`https://github.com/users/Duke40199/packages/container/idac-amane-bot/settings` →
+Danger Zone → Change visibility → Public. Verify anonymous pull is allowed:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" \
+  "https://ghcr.io/token?scope=repository:duke40199/idac-amane-bot:pull&service=ghcr.io"
+# 200 = public, 401 = still private
+```
+
+(To keep it private instead, add an `imagePullSecret` — see the note at the end.)
 
 ### 2. Seal the Secret and commit it
 
@@ -87,12 +112,23 @@ Fill in your values locally, then **seal** them — encrypt into a `SealedSecret
 only this cluster can decrypt, so it's safe to commit to a public repo. `secret.env`
 stays local (gitignored); only the encrypted `sealed-secret.yaml` is committed.
 
+Run this on the machine with `kubeseal` + cluster access (the minikube box):
+
 ```bash
 cp projects/idac-amane-bot/base/secret.env.example projects/idac-amane-bot/base/secret.env
 # edit secret.env — token, DB creds/host/name, Discord IDs, SEGA/All.Net endpoints
 
 ./scripts/seal-secret.sh   # writes projects/idac-amane-bot/overlays/local/sealed-secret.yaml
 ```
+
+> **Two `secret.env` rules that will silently break startup if ignored:**
+> 1. **No quotes, no trailing spaces** — use bare `KEY=value`. `--from-env-file`
+>    keeps quotes literally, so `DB_HOST="host"` resolves the host *with* the quote
+>    characters (`no such host`) and `DB_PORT="5432"` fails to parse (`missing
+>    required environment variables: DB_PORT`).
+> 2. **Only sensitive keys** — `DB_PORT`, `DB_SSLMODE`, `APP_ENV`, `PORT` live in the
+>    ConfigMap. The Deployment's `envFrom` lists the Secret *after* the ConfigMap, so
+>    a duplicated key in the Secret overrides the ConfigMap (often with a broken value).
 
 First run only: uncomment the `- sealed-secret.yaml` line in
 `projects/idac-amane-bot/overlays/local/kustomization.yaml`. Then commit + push both.
@@ -102,11 +138,29 @@ ArgoCD syncs the SealedSecret; the controller unseals it into the real
 This Secret holds everything sensitive/identifying — the ConfigMap only has
 non-sensitive tuning, so there's nothing to hide there.
 
-### 3. (Optional) Adjust the ConfigMap
+### 3. Point at your Postgres (ConfigMap + Secret)
 
-`configmap.yaml` ships with working defaults. Tweak only if needed — e.g. set
-`DB_SSLMODE: require` if your Postgres enforces TLS, or change the sync intervals.
-If you edit it, commit + push so ArgoCD picks it up.
+`configmap.yaml` ships `DB_SSLMODE: require` (managed Postgres like Supabase, Neon
+or RDS requires TLS — `disable` gets rejected) and `DB_PORT: "5432"`. The DB target
+itself (`DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`) lives in the Secret.
+
+The host must be reachable **from inside the cluster**, not just your laptop:
+- **Managed cloud DB (Supabase/Neon/etc.):** use the IPv4 endpoint. For Supabase
+  that's the **Session Pooler** (`aws-1-<region>.pooler.supabase.com`, user
+  `postgres.<project-ref>`, port 5432) — the direct `db.<ref>.supabase.co` is
+  IPv6-only and won't resolve from the pod.
+- **DB on the minikube host:** `host.minikube.internal` (Postgres listening beyond
+  localhost, firewall open).
+
+Quick reachability check from the cluster:
+
+```bash
+kubectl -n idac-amane run netcheck --image=busybox --restart=Never -- \
+  sh -c 'nc -zv -w5 <your-db-host> 5432'
+kubectl -n idac-amane logs netcheck; kubectl -n idac-amane delete pod netcheck
+```
+
+If you edit the ConfigMap, commit + push and `rollout restart` so the pod re-reads env.
 
 ### 4. Tell ArgoCD about it
 
