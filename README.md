@@ -123,12 +123,12 @@ cp projects/idac-amane-bot/base/secret.env.example projects/idac-amane-bot/base/
 
 > **Two `secret.env` rules that will silently break startup if ignored:**
 > 1. **No quotes, no trailing spaces** — use bare `KEY=value`. `--from-env-file`
->    keeps quotes literally, so `DB_HOST="host"` resolves the host *with* the quote
->    characters (`no such host`) and `DB_PORT="5432"` fails to parse (`missing
+     >    keeps quotes literally, so `DB_HOST="host"` resolves the host *with* the quote
+     >    characters (`no such host`) and `DB_PORT="5432"` fails to parse (`missing
 >    required environment variables: DB_PORT`).
 > 2. **Only sensitive keys** — `DB_PORT`, `DB_SSLMODE`, `APP_ENV`, `PORT` live in the
->    ConfigMap. The Deployment's `envFrom` lists the Secret *after* the ConfigMap, so
->    a duplicated key in the Secret overrides the ConfigMap (often with a broken value).
+     >    ConfigMap. The Deployment's `envFrom` lists the Secret *after* the ConfigMap, so
+     >    a duplicated key in the Secret overrides the ConfigMap (often with a broken value).
 
 First run only: uncomment the `- sealed-secret.yaml` line in
 `projects/idac-amane-bot/overlays/local/kustomization.yaml`. Then commit + push both.
@@ -231,6 +231,64 @@ committed. (SOPS is an equivalent alternative to Sealed Secrets.)
 > controller — just re-run `scripts/seal-secret.sh` to re-seal against the new key.
 > (Back up the controller's sealing key if you want sealed values to survive a
 > rebuild.)
+
+## Exposing the ArgoCD UI (Cloudflare Tunnel)
+
+The ArgoCD UI is reachable at **https://idac-bot-deployment-svc.poteto.moe** via a
+**Cloudflare Tunnel** — an outbound-only connector, so there are no router ports to
+forward, no public IP needed, and TLS is terminated at Cloudflare's edge. The
+connector itself (`cloudflared`) is a GitOps-managed app in this repo, under
+`projects/cloudflared/`, so the ApplicationSet picks it up like any other app.
+
+It's a **token-based** tunnel: the public-hostname → service *routing* lives in the
+Cloudflare Zero Trust dashboard, not in Git. The only thing the cluster needs is the
+tunnel **token**, handled the same way as the bot's secrets — sealed, so the
+encrypted file is safe in this public repo. The `cloudflared` pod runs *in-cluster*
+and reaches ArgoCD over cluster DNS, which sidesteps all minikube host-networking.
+
+One-time setup:
+
+1. **Make argocd-server tunnel-friendly** (serve plain HTTP; the edge does TLS):
+
+   ```bash
+   kubectl -n argocd patch configmap argocd-cmd-params-cm \
+     --type merge -p '{"data":{"server.insecure":"true"}}'
+   kubectl -n argocd rollout restart deploy argocd-server
+   ```
+
+2. **Seal the tunnel token** on the shoebox (where `kubeseal` + cluster access live):
+
+   ```bash
+   cp projects/cloudflared/base/secret.env.example projects/cloudflared/base/secret.env
+   # paste the token (dashboard: Networks -> Tunnels -> <tunnel> -> Configure, after --token)
+   ./scripts/seal-secret.sh cloudflared
+   ```
+
+   Then uncomment the `- sealed-secret.yaml` line in
+   `projects/cloudflared/overlays/local/kustomization.yaml` (first run only) and
+   commit + push both. ArgoCD syncs it; the controller unseals it into
+   `cloudflared-tunnel-token`, which the Deployment reads as `$TUNNEL_TOKEN`.
+
+3. **Point the dashboard's public hostname at the in-cluster service.** Because
+   `cloudflared` now runs as a pod, the public hostname's **Service** URL must be
+   cluster-DNS-resolvable: `HTTP` → `argocd-server.argocd.svc.cluster.local:80`.
+   (If you first ran `cloudflared` on the host, update this from the old
+   host/`minikube ip` URL.)
+
+4. **Decommission the old connector.** If you brought the tunnel up by hand (a host
+   `cloudflared` service or a hand-applied pod), stop it once the in-cluster pod is
+   `Running` — otherwise two connectors serve the same tunnel and requests
+   load-balance across both.
+
+5. **(Recommended) Gate the UI** with Zero Trust → Access → Applications so the login
+   page isn't open to the internet.
+
+Verify:
+
+```bash
+kubectl -n idac-amane get pods -l app=cloudflared
+kubectl -n idac-amane logs deploy/cloudflared -f   # look for 4x "Registered tunnel connection"
+```
 
 ## What changed vs. `deployment-service` (AWS -> local)
 

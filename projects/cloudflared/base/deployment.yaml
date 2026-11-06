@@ -1,0 +1,79 @@
+# cloudflared — Cloudflare Tunnel connector for the shoebox.
+#
+# Exposes in-cluster services to the public internet over an OUTBOUND-only tunnel
+# (no router ports, no public IP, free TLS). Today it fronts the ArgoCD UI at
+# https://idac-bot-deployment-svc.poteto.moe.
+#
+# This is a TOKEN-based (remotely-managed) tunnel: the public-hostname -> service
+# ROUTING lives in the Cloudflare Zero Trust dashboard, NOT in this repo. The only
+# thing the cluster needs is the tunnel TOKEN, which is sensitive and therefore
+# sealed (see secret.example.yaml / secret.env.example) — exactly like the bot's
+# Secret, so it's safe to commit encrypted to this public repo.
+#
+# Because routing is dashboard-side, the dashboard's "service" URL must resolve from
+# THIS pod's network (cluster DNS). For the ArgoCD UI that is:
+#   http://argocd-server.argocd.svc.cluster.local:80
+# argocd-server must run in insecure mode (server.insecure=true) so port 80 serves
+# plain HTTP — TLS is terminated at Cloudflare's edge, so letting argocd-server also
+# do TLS/redirects would loop. See the README "Exposing the ArgoCD UI" section.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  labels:
+    app: cloudflared
+spec:
+  # 1 is fine for a homelab. Cloudflare supports multiple connectors per tunnel for
+  # HA, so you could bump this later; each replica dials out independently.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cloudflared
+  template:
+    metadata:
+      labels:
+        app: cloudflared
+    spec:
+      containers:
+        - name: cloudflared
+          # Third-party infra image (not one we build), so a pinned version IS the
+          # upgrade knob — bump this line + commit to upgrade. Match it to the
+          # cloudflared you already run (`cloudflared --version` on the shoebox), or
+          # check https://hub.docker.com/r/cloudflare/cloudflared/tags.
+          image: cloudflare/cloudflared:2026.9.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - tunnel
+            - --no-autoupdate
+            # Bind the metrics server to a fixed port so the probes below have a
+            # target; /ready reports tunnel connectivity.
+            - --metrics
+            - 0.0.0.0:2000
+            - run
+            - --token
+            - $(TUNNEL_TOKEN)
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cloudflared-tunnel-token
+                  key: TUNNEL_TOKEN
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
