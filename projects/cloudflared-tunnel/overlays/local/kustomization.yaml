@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Same namespace as the bot: the ApplicationSet deploys every app into idac-amane
+# (see applicationsets/apps.yaml). ArgoCD creates it (CreateNamespace=true).
+namespace: idac-amane
+
+resources:
+  - ../../base
+  # The SealedSecret is cluster-specific (encrypted to THIS cluster's key), so it
+  # lives in the overlay, not the shared base. Generate it on the shoebox with:
+  #   ./scripts/seal-secret.sh cloudflared
+  # then uncomment the next line (first run only) and commit sealed-secret.yaml.
+  # Until it exists, the cloudflared pod stays pending on the missing Secret.
+  - sealed-secret.yaml
