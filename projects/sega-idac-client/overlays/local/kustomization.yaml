@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The ApplicationSet deploys every app into idac-amane (applicationsets/apps.yaml). Keep
+# this in sync with that destination; to give this service its own namespace, also
+# template the namespace in the ApplicationSet.
+namespace: idac-amane
+
+resources:
+  - ../../base
+  # The SealedSecret is cluster-specific (encrypted to THIS cluster's key), so it
+  # lives in the overlay. Generate it on the shoebox with:
+  #   ./scripts/seal-secret.sh sega-idac-client
+  # then uncomment the next line (first run only) and commit sealed-secret.yaml.
+  # Until it exists, the pod stays pending on the missing Secret.
+  # - sealed-secret.yaml
+
+# Pin the image here (the GitOps place; base stays a default). Build + push:
+#   docker buildx build --platform linux/amd64,linux/arm64 \
+#     -t ghcr.io/duke40199/sega-idac-client:0.1.0 --push <path-to-source>
+# Bump newTag to ship a new build.
+images:
+  - name: sega-idac-client
+    newName: ghcr.io/duke40199/sega-idac-client
+    newTag: "0.1.0"

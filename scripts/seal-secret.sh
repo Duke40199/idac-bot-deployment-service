@@ -4,7 +4,8 @@
 #
 # Usage:
 #   ./scripts/seal-secret.sh [project]
-#     project: idac-amane-bot (default) | cloudflared
+#     project: idac-amane-bot (default) | cloudflared-tunnel | any scaffolded
+#              service (defaults its Secret name to <project>-secret)
 #
 # Run from the repo root. Requires:
 #   - kubeseal installed locally (brew install kubeseal / dnf install kubeseal)
@@ -22,17 +23,28 @@
 # value later, edit secret.env, re-run this, commit + push — same loop as config.
 set -euo pipefail
 
+# Share the NS default with new-service.sh via the repo-root .env (gitignored; copy
+# from .env.example). Sealing for the wrong namespace makes the SealedSecret
+# undecryptable, so both scripts must agree on NS.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -f "$ROOT/.env" ]]; then
+  set -a; . "$ROOT/.env"; set +a
+fi
+
 PROJECT="${1:-idac-amane-bot}"
 
-# All apps share the idac-amane namespace (see applicationsets/apps.yaml), so the
-# SealedSecret is sealed for that namespace. The Secret NAME differs per project.
-NS="idac-amane"
+# All apps share one namespace (see applicationsets/apps.yaml), so the SealedSecret
+# is sealed for that namespace. The Secret NAME differs per project.
+NS="${NS:-idac-amane}"
 case "$PROJECT" in
   idac-amane-bot) NAME="idac-amane-bot-secret" ;;
   cloudflared-tunnel)    NAME="cloudflared-tunnel-token" ;;
   *)
-    echo "error: unknown project '$PROJECT' (expected: idac-amane-bot | cloudflared-tunnel)" >&2
-    exit 1
+    # Default convention for services scaffolded by scripts/new-service.sh:
+    # <project>-secret. idac-amane-bot and cloudflared-tunnel are pinned above
+    # because their Secret names predate this convention. A typo'd project name
+    # falls through here and is caught by the secret.env existence check below.
+    NAME="${PROJECT}-secret"
     ;;
 esac
 

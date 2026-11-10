@@ -1,0 +1,55 @@
+# sega-idac-client — scaffolded by scripts/new-service.sh.
+#
+# Config comes entirely from the environment:
+#   - ConfigMap  sega-idac-client-config : non-secret values
+#   - Secret     sega-idac-client-secret : sensitive/identifying values (sealed, see overlay)
+# envFrom lists the Secret AFTER the ConfigMap, so a duplicated key in the Secret
+# overrides the ConfigMap — keep each key in exactly one of them.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sega-idac-client
+  labels:
+    app: sega-idac-client
+spec:
+  # Bump if your service scales horizontally; keep 1 for singletons.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sega-idac-client
+  template:
+    metadata:
+      labels:
+        app: sega-idac-client
+    spec:
+      containers:
+        - name: sega-idac-client
+          # Overlay pins newName/newTag -> ghcr.io/duke40199/sega-idac-client:0.1.0.
+          # Never rely on :latest (ArgoCD can't detect a redeploy if the tag is
+          # unchanged, and IfNotPresent would keep a stale cached image).
+          image: sega-idac-client
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: sega-idac-client-config
+            - secretRef:
+                name: sega-idac-client-secret
+          # TODO: if your service serves HTTP, expose its port + add probes.
+          # ports:
+          #   - name: health
+          #     containerPort: 10000
+          # livenessProbe:
+          #   httpGet: { path: /healthz, port: health }
+          #   initialDelaySeconds: 10
+          #   periodSeconds: 15
+          # readinessProbe:
+          #   httpGet: { path: /healthz, port: health }
+          #   initialDelaySeconds: 5
+          #   periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
