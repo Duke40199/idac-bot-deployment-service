@@ -1,0 +1,13 @@
+# Non-sensitive config for sega-idac-client. Committed as-is (safe to publish). Anything
+# sensitive OR identifying belongs in the Secret instead (secret.example.yaml),
+# never here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sega-idac-client-config
+  labels:
+    app: sega-idac-client
+data:
+  # TODO: replace with your service's real non-secret env vars.
+  APP_ENV: "dev"
+  # PORT: "10000"
