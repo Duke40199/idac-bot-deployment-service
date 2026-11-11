@@ -1,0 +1,26 @@
+# ClusterIP Service for sega-idac-client.
+#
+# The Cloudflare Tunnel (projects/cloudflared-tunnel) routes a public hostname to
+# the `http` port over PLAIN HTTP — public TLS is terminated at the Cloudflare
+# edge, so nothing in-cluster serves TLS. Point the dashboard's service URL at:
+#   http://sega-idac-client.idac-amane.svc.cluster.local:8080
+#
+# The `grpc` port is for in-cluster callers (e.g. idac-amane-bot) over gRPC:
+#   sega-idac-client.idac-amane.svc.cluster.local:50051
+apiVersion: v1
+kind: Service
+metadata:
+  name: sega-idac-client
+  labels:
+    app: sega-idac-client
+spec:
+  type: ClusterIP
+  selector:
+    app: sega-idac-client
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: grpc
+      port: 50051
+      targetPort: grpc

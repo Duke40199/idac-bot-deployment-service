@@ -34,18 +34,22 @@ spec:
                 name: sega-idac-client-config
             - secretRef:
                 name: sega-idac-client-secret
-          # TODO: if your service serves HTTP, expose its port + add probes.
-          # ports:
-          #   - name: health
-          #     containerPort: 10000
-          # livenessProbe:
-          #   httpGet: { path: /healthz, port: health }
-          #   initialDelaySeconds: 10
-          #   periodSeconds: 15
-          # readinessProbe:
-          #   httpGet: { path: /healthz, port: health }
-          #   initialDelaySeconds: 5
-          #   periodSeconds: 10
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: grpc
+              containerPort: 50051
+          # Probes hit the HTTP gateway's /v1/health, which proxies to the gRPC
+          # health service — so a passing probe confirms BOTH listeners are up.
+          # Plain HTTP here (TLS is off; terminated at the Cloudflare edge).
+          livenessProbe:
+            httpGet: { path: /v1/health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /v1/health, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
           resources:
             requests:
               cpu: 50m

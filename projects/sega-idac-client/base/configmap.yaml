@@ -8,6 +8,14 @@ metadata:
   labels:
     app: sega-idac-client
 data:
-  # TODO: replace with your service's real non-secret env vars.
   APP_ENV: "dev"
-  # PORT: "10000"
+  # gRPC server (consumed in-cluster, e.g. by idac-amane-bot over gRPC).
+  GRPC_HOST: "0.0.0.0"
+  GRPC_PORT: "50051"
+  # HTTP gateway (REST/JSON). Plain HTTP on purpose: the Cloudflare Tunnel
+  # terminates public TLS at the edge and reaches this Service over HTTP, so
+  # HTTP_TLS_CERT / HTTP_TLS_KEY are intentionally left UNSET (TLS off).
+  HTTP_HOST: "0.0.0.0"
+  HTTP_PORT: "8080"
+  # NOTE: SEGA_IDAC_* and ALLNET_* upstream host/paths are identifying, so they
+  # belong in the sealed Secret (secret.env), not here.
