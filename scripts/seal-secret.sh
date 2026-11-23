@@ -7,7 +7,7 @@
 #     project: idac-amane-bot (default) | cloudflared-tunnel | any scaffolded
 #              service (defaults its Secret name to <project>-secret)
 #
-# Run from the repo root. Requires:
+# Runs from any directory (paths are anchored to the repo root). Requires:
 #   - kubeseal installed locally (brew install kubeseal / dnf install kubeseal)
 #   - the sealed-secrets controller running in the target cluster
 #   - your kubectl context pointing at that cluster (kubeseal fetches its public
@@ -48,8 +48,9 @@ case "$PROJECT" in
     ;;
 esac
 
-ENV_FILE="projects/$PROJECT/base/secret.env"
-OUT="projects/$PROJECT/overlays/local/sealed-secret.yaml"
+# Anchored to the repo root (not the CWD), so the script runs from any directory.
+ENV_FILE="$ROOT/projects/$PROJECT/base/secret.env"
+OUT="$ROOT/projects/$PROJECT/overlays/local/sealed-secret.yaml"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "error: $ENV_FILE not found. Copy ${ENV_FILE}.example to $ENV_FILE and fill it in." >&2
